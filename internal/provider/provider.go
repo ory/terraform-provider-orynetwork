@@ -1,0 +1,236 @@
+// Copyright 2025 Materialize Inc. and contributors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package provider
+
+import (
+	"context"
+	"os"
+
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/provider"
+	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/jasonhernandez/terraform-provider-orynetwork/internal/client"
+	projectds "github.com/jasonhernandez/terraform-provider-orynetwork/internal/datasources/project"
+	"github.com/jasonhernandez/terraform-provider-orynetwork/internal/resources/action"
+	"github.com/jasonhernandez/terraform-provider-orynetwork/internal/resources/emailtemplate"
+	"github.com/jasonhernandez/terraform-provider-orynetwork/internal/resources/identity"
+	"github.com/jasonhernandez/terraform-provider-orynetwork/internal/resources/identityschema"
+	"github.com/jasonhernandez/terraform-provider-orynetwork/internal/resources/jwk"
+	"github.com/jasonhernandez/terraform-provider-orynetwork/internal/resources/oauth2client"
+	"github.com/jasonhernandez/terraform-provider-orynetwork/internal/resources/organization"
+	"github.com/jasonhernandez/terraform-provider-orynetwork/internal/resources/project"
+	"github.com/jasonhernandez/terraform-provider-orynetwork/internal/resources/projectapikey"
+	"github.com/jasonhernandez/terraform-provider-orynetwork/internal/resources/projectconfig"
+	"github.com/jasonhernandez/terraform-provider-orynetwork/internal/resources/relationship"
+	"github.com/jasonhernandez/terraform-provider-orynetwork/internal/resources/socialprovider"
+	"github.com/jasonhernandez/terraform-provider-orynetwork/internal/resources/workspace"
+)
+
+// Ensure OryProvider satisfies various provider interfaces.
+var _ provider.Provider = &OryProvider{}
+
+// OryProvider defines the provider implementation.
+type OryProvider struct {
+	// version is set to the provider version on release, "dev" when the
+	// provider is built and ran locally, and "test" when running acceptance
+	// tests.
+	version string
+}
+
+// OryProviderModel describes the provider data model.
+type OryProviderModel struct {
+	// API Keys
+	WorkspaceAPIKey types.String `tfsdk:"workspace_api_key"`
+	ProjectAPIKey   types.String `tfsdk:"project_api_key"`
+
+	// Project/Workspace identifiers
+	ProjectID   types.String `tfsdk:"project_id"`
+	ProjectSlug types.String `tfsdk:"project_slug"`
+	WorkspaceID types.String `tfsdk:"workspace_id"`
+
+	// Optional: Override API URLs (for testing)
+	ConsoleAPIURL types.String `tfsdk:"console_api_url"`
+}
+
+// New returns a new provider instance.
+func New(version string) func() provider.Provider {
+	return func() provider.Provider {
+		return &OryProvider{
+			version: version,
+		}
+	}
+}
+
+func (p *OryProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
+	resp.TypeName = "ory"
+	resp.Version = p.version
+}
+
+func (p *OryProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		Description: "Provider for managing Ory Network resources.",
+		MarkdownDescription: `
+The Ory provider enables Terraform to manage [Ory Network](https://www.ory.sh/) resources.
+
+## Authentication
+
+Ory Network uses two types of API keys:
+
+1. **Workspace API Key** (` + "`ory_wak_...`" + `): For organizations, projects, and workspace management
+2. **Project API Key** (` + "`ory_pat_...`" + `): For identities, OAuth2 clients, and sessions
+
+Configure via environment variables or provider block:
+
+` + "```hcl" + `
+provider "ory" {
+  workspace_api_key = var.ory_workspace_key  # or ORY_WORKSPACE_API_KEY env var
+  project_api_key   = var.ory_project_key    # or ORY_PROJECT_API_KEY env var
+  project_id        = var.ory_project_id     # or ORY_PROJECT_ID env var
+  project_slug      = var.ory_project_slug   # or ORY_PROJECT_SLUG env var
+}
+` + "```" + `
+`,
+		Attributes: map[string]schema.Attribute{
+			"workspace_api_key": schema.StringAttribute{
+				Description:         "Ory Workspace API Key (ory_wak_...). Used for organization and project management. Can also be set via ORY_WORKSPACE_API_KEY environment variable.",
+				MarkdownDescription: "Ory Workspace API Key (`ory_wak_...`). Used for organization and project management. Can also be set via `ORY_WORKSPACE_API_KEY` environment variable.",
+				Optional:            true,
+				Sensitive:           true,
+			},
+			"project_api_key": schema.StringAttribute{
+				Description:         "Ory Project API Key (ory_pat_...). Used for identity and OAuth2 operations. Can also be set via ORY_PROJECT_API_KEY environment variable.",
+				MarkdownDescription: "Ory Project API Key (`ory_pat_...`). Used for identity and OAuth2 operations. Can also be set via `ORY_PROJECT_API_KEY` environment variable.",
+				Optional:            true,
+				Sensitive:           true,
+			},
+			"project_id": schema.StringAttribute{
+				Description:         "Ory Project ID. Can also be set via ORY_PROJECT_ID environment variable.",
+				MarkdownDescription: "Ory Project ID. Can also be set via `ORY_PROJECT_ID` environment variable.",
+				Optional:            true,
+			},
+			"project_slug": schema.StringAttribute{
+				Description:         "Ory Project Slug (e.g., 'vibrant-moore-abc123'). Required for identity and OAuth2 operations. Can also be set via ORY_PROJECT_SLUG environment variable.",
+				MarkdownDescription: "Ory Project Slug (e.g., `vibrant-moore-abc123`). Required for identity and OAuth2 operations. Can also be set via `ORY_PROJECT_SLUG` environment variable.",
+				Optional:            true,
+			},
+			"workspace_id": schema.StringAttribute{
+				Description:         "Ory Workspace ID. Can also be set via ORY_WORKSPACE_ID environment variable.",
+				MarkdownDescription: "Ory Workspace ID. Can also be set via `ORY_WORKSPACE_ID` environment variable.",
+				Optional:            true,
+			},
+			"console_api_url": schema.StringAttribute{
+				Description:         "Override the console API URL (default: https://api.console.ory.sh). Mainly for testing.",
+				MarkdownDescription: "Override the console API URL (default: `https://api.console.ory.sh`). Mainly for testing.",
+				Optional:            true,
+			},
+		},
+	}
+}
+
+func (p *OryProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
+	var config OryProviderModel
+
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Resolve configuration with environment variable fallbacks
+	workspaceAPIKey := resolveString(config.WorkspaceAPIKey, "ORY_WORKSPACE_API_KEY")
+	projectAPIKey := resolveString(config.ProjectAPIKey, "ORY_PROJECT_API_KEY")
+	projectID := resolveString(config.ProjectID, "ORY_PROJECT_ID")
+	projectSlug := resolveString(config.ProjectSlug, "ORY_PROJECT_SLUG")
+	workspaceID := resolveString(config.WorkspaceID, "ORY_WORKSPACE_ID")
+	consoleAPIURL := resolveStringDefault(config.ConsoleAPIURL, "ORY_CONSOLE_API_URL", "https://api.console.ory.sh")
+
+	// Validate required configuration
+	if workspaceAPIKey == "" && projectAPIKey == "" {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("workspace_api_key"),
+			"Missing Ory API Key",
+			"At least one of workspace_api_key or project_api_key must be configured. "+
+				"Set via provider configuration or environment variables (ORY_WORKSPACE_API_KEY, ORY_PROJECT_API_KEY).",
+		)
+		return
+	}
+
+	// Create the Ory client
+	oryClient, err := client.NewOryClient(client.OryClientConfig{
+		WorkspaceAPIKey: workspaceAPIKey,
+		ProjectAPIKey:   projectAPIKey,
+		ProjectID:       projectID,
+		ProjectSlug:     projectSlug,
+		WorkspaceID:     workspaceID,
+		ConsoleAPIURL:   consoleAPIURL,
+	})
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Unable to Create Ory Client",
+			"An error occurred creating the Ory API client: "+err.Error(),
+		)
+		return
+	}
+
+	// Make client available to resources and data sources
+	resp.DataSourceData = oryClient
+	resp.ResourceData = oryClient
+}
+
+func (p *OryProvider) Resources(ctx context.Context) []func() resource.Resource {
+	return []func() resource.Resource{
+		project.NewResource,
+		workspace.NewResource,
+		organization.NewResource,
+		identity.NewResource,
+		oauth2client.NewResource,
+		projectconfig.NewResource,
+		action.NewResource,
+		identityschema.NewResource,
+		socialprovider.NewResource,
+		emailtemplate.NewResource,
+		projectapikey.NewResource,
+		jwk.NewResource,
+		relationship.NewResource,
+	}
+}
+
+func (p *OryProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
+	return []func() datasource.DataSource{
+		projectds.NewDataSource,
+	}
+}
+
+// Helper functions
+
+func resolveString(tfValue types.String, envVar string) string {
+	if !tfValue.IsNull() && !tfValue.IsUnknown() {
+		return tfValue.ValueString()
+	}
+	return os.Getenv(envVar)
+}
+
+func resolveStringDefault(tfValue types.String, envVar, defaultValue string) string {
+	if !tfValue.IsNull() && !tfValue.IsUnknown() {
+		return tfValue.ValueString()
+	}
+	if v := os.Getenv(envVar); v != "" {
+		return v
+	}
+	return defaultValue
+}

@@ -1,0 +1,469 @@
+// Copyright 2025 Materialize Inc. and contributors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package action
+
+import (
+	"context"
+	"encoding/base64"
+	"fmt"
+	"strings"
+
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+	ory "github.com/ory/client-go"
+
+	"github.com/jasonhernandez/terraform-provider-orynetwork/internal/client"
+)
+
+var (
+	_ resource.Resource                = &ActionResource{}
+	_ resource.ResourceWithConfigure   = &ActionResource{}
+	_ resource.ResourceWithImportState = &ActionResource{}
+)
+
+func NewResource() resource.Resource {
+	return &ActionResource{}
+}
+
+type ActionResource struct {
+	client *client.OryClient
+}
+
+type ActionResourceModel struct {
+	ID             types.String `tfsdk:"id"`
+	ProjectID      types.String `tfsdk:"project_id"`
+	Flow           types.String `tfsdk:"flow"`
+	Timing         types.String `tfsdk:"timing"`
+	AuthMethod     types.String `tfsdk:"auth_method"`
+	URL            types.String `tfsdk:"url"`
+	HTTPMethod     types.String `tfsdk:"method"`
+	Body           types.String `tfsdk:"body"`
+	ResponseIgnore types.Bool   `tfsdk:"response_ignore"`
+	ResponseParse  types.Bool   `tfsdk:"response_parse"`
+	CanInterrupt   types.Bool   `tfsdk:"can_interrupt"`
+}
+
+func (r *ActionResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_action"
+}
+
+func (r *ActionResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		Description: "Manages an Ory Action (webhook) for identity flows.",
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Description: "Resource ID.",
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"project_id": schema.StringAttribute{
+				Description: "Project ID. If not set, uses provider's project_id.",
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"flow": schema.StringAttribute{
+				Description: "Identity flow to hook into (login, registration, recovery, settings, verification).",
+				Required:    true,
+				Validators: []validator.String{
+					stringvalidator.OneOf("login", "registration", "recovery", "settings", "verification"),
+				},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"timing": schema.StringAttribute{
+				Description: "When to trigger: 'before' (pre-hook) or 'after' (post-hook).",
+				Required:    true,
+				Validators: []validator.String{
+					stringvalidator.OneOf("before", "after"),
+				},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"auth_method": schema.StringAttribute{
+				Description: "Authentication method to hook into (password, oidc, code, webauthn, passkey, totp, lookup_secret). Required for 'after' timing.",
+				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString("password"),
+				Validators: []validator.String{
+					stringvalidator.OneOf("password", "oidc", "code", "webauthn", "passkey", "totp", "lookup_secret"),
+				},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"url": schema.StringAttribute{
+				Description: "Webhook URL to call.",
+				Required:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"method": schema.StringAttribute{
+				Description: "HTTP method (default: POST).",
+				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString("POST"),
+			},
+			"body": schema.StringAttribute{
+				Description: "Jsonnet template for the request body.",
+				Optional:    true,
+			},
+			"response_ignore": schema.BoolAttribute{
+				Description: "Run webhook async without waiting (default: false).",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+			"response_parse": schema.BoolAttribute{
+				Description: "Parse response to modify identity (default: false).",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+			"can_interrupt": schema.BoolAttribute{
+				Description: "Allow webhook to interrupt/block the flow (default: false).",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+		},
+	}
+}
+
+func (r *ActionResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+	oryClient, ok := req.ProviderData.(*client.OryClient)
+	if !ok {
+		resp.Diagnostics.AddError("Unexpected Resource Configure Type",
+			fmt.Sprintf("Expected *client.OryClient, got: %T", req.ProviderData))
+		return
+	}
+	r.client = oryClient
+}
+
+func (r *ActionResource) buildHookValue(plan *ActionResourceModel) map[string]interface{} {
+	hookConfig := map[string]interface{}{
+		"url":    plan.URL.ValueString(),
+		"method": plan.HTTPMethod.ValueString(),
+	}
+
+	if !plan.Body.IsNull() && !plan.Body.IsUnknown() && plan.Body.ValueString() != "" {
+		body := plan.Body.ValueString()
+		if !strings.HasPrefix(body, "base64://") {
+			encoded := base64.StdEncoding.EncodeToString([]byte(body))
+			body = "base64://" + encoded
+		}
+		hookConfig["body"] = body
+	}
+
+	response := map[string]interface{}{}
+	if !plan.ResponseIgnore.IsNull() && !plan.ResponseIgnore.IsUnknown() {
+		response["ignore"] = plan.ResponseIgnore.ValueBool()
+	}
+	if !plan.ResponseParse.IsNull() && !plan.ResponseParse.IsUnknown() {
+		response["parse"] = plan.ResponseParse.ValueBool()
+	}
+	if len(response) > 0 {
+		hookConfig["response"] = response
+	}
+
+	if !plan.CanInterrupt.IsNull() && !plan.CanInterrupt.IsUnknown() {
+		hookConfig["can_interrupt"] = plan.CanInterrupt.ValueBool()
+	}
+
+	return map[string]interface{}{
+		"hook":   "web_hook",
+		"config": hookConfig,
+	}
+}
+
+func (r *ActionResource) getHooks(ctx context.Context, projectID, flow, timing, authMethod string) ([]map[string]interface{}, error) {
+	project, err := r.client.GetProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+
+	if project.Services.Identity == nil {
+		return nil, nil
+	}
+
+	configMap := project.Services.Identity.Config
+	if configMap == nil {
+		return nil, nil
+	}
+
+	selfservice, _ := configMap["selfservice"].(map[string]interface{})
+	flows, _ := selfservice["flows"].(map[string]interface{})
+	flowConfig, _ := flows[flow].(map[string]interface{})
+	timingConfig, _ := flowConfig[timing].(map[string]interface{})
+
+	// For 'after' timing, hooks are nested under the auth method
+	// For 'before' timing, hooks are directly under timing
+	var hooks []interface{}
+	if timing == "after" {
+		authMethodConfig, _ := timingConfig[authMethod].(map[string]interface{})
+		hooks, _ = authMethodConfig["hooks"].([]interface{})
+	} else {
+		hooks, _ = timingConfig["hooks"].([]interface{})
+	}
+
+	result := make([]map[string]interface{}, 0, len(hooks))
+	for _, h := range hooks {
+		if hm, ok := h.(map[string]interface{}); ok {
+			result = append(result, hm)
+		}
+	}
+	return result, nil
+}
+
+func (r *ActionResource) findHookIndex(hooks []map[string]interface{}, url, method string) int {
+	for i, hook := range hooks {
+		if hook["hook"] == "web_hook" {
+			config, _ := hook["config"].(map[string]interface{})
+			hookURL, _ := config["url"].(string)
+			hookMethod, _ := config["method"].(string)
+			if hookMethod == "" {
+				hookMethod = "POST"
+			}
+			if hookURL == url && hookMethod == method {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func (r *ActionResource) hookPath(flow, timing, authMethod string) string {
+	if timing == "after" {
+		return fmt.Sprintf("/services/identity/config/selfservice/flows/%s/%s/%s/hooks", flow, timing, authMethod)
+	}
+	return fmt.Sprintf("/services/identity/config/selfservice/flows/%s/%s/hooks", flow, timing)
+}
+
+func (r *ActionResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var plan ActionResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	projectID := plan.ProjectID.ValueString()
+	if projectID == "" {
+		projectID = r.client.ProjectID()
+	}
+
+	flow := plan.Flow.ValueString()
+	timing := plan.Timing.ValueString()
+	authMethod := plan.AuthMethod.ValueString()
+	url := plan.URL.ValueString()
+	httpMethod := plan.HTTPMethod.ValueString()
+
+	// Check if hook already exists
+	hooks, err := r.getHooks(ctx, projectID, flow, timing, authMethod)
+	if err != nil {
+		resp.Diagnostics.AddError("Error Getting Hooks", err.Error())
+		return
+	}
+
+	if r.findHookIndex(hooks, url, httpMethod) >= 0 {
+		resp.Diagnostics.AddError("Hook Already Exists",
+			fmt.Sprintf("A webhook already exists for %s/%s/%s with URL %s", flow, timing, authMethod, url))
+		return
+	}
+
+	hookValue := r.buildHookValue(&plan)
+	hookPath := r.hookPath(flow, timing, authMethod)
+
+	// Append the new hook to existing hooks and replace the entire array
+	// This handles the case where the hooks array might not exist
+	newHooks := make([]interface{}, 0, len(hooks)+1)
+	for _, h := range hooks {
+		newHooks = append(newHooks, h)
+	}
+	newHooks = append(newHooks, hookValue)
+
+	patches := []ory.JsonPatch{{
+		Op:    "replace",
+		Path:  hookPath,
+		Value: newHooks,
+	}}
+
+	_, err = r.client.PatchProject(ctx, projectID, patches)
+	if err != nil {
+		resp.Diagnostics.AddError("Error Creating Action", err.Error())
+		return
+	}
+
+	plan.ID = types.StringValue(fmt.Sprintf("%s:%s:%s:%s:%s", projectID, flow, timing, authMethod, url))
+	plan.ProjectID = types.StringValue(projectID)
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
+}
+
+func (r *ActionResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var state ActionResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	projectID := state.ProjectID.ValueString()
+	flow := state.Flow.ValueString()
+	timing := state.Timing.ValueString()
+	authMethod := state.AuthMethod.ValueString()
+	url := state.URL.ValueString()
+	httpMethod := state.HTTPMethod.ValueString()
+
+	hooks, err := r.getHooks(ctx, projectID, flow, timing, authMethod)
+	if err != nil {
+		resp.Diagnostics.AddError("Error Reading Action", err.Error())
+		return
+	}
+
+	index := r.findHookIndex(hooks, url, httpMethod)
+	if index < 0 {
+		resp.State.RemoveResource(ctx)
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+func (r *ActionResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan ActionResourceModel
+	var state ActionResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	projectID := plan.ProjectID.ValueString()
+	if projectID == "" {
+		projectID = r.client.ProjectID()
+	}
+
+	flow := plan.Flow.ValueString()
+	timing := plan.Timing.ValueString()
+	authMethod := plan.AuthMethod.ValueString()
+	url := state.URL.ValueString() // Use old URL to find
+	httpMethod := state.HTTPMethod.ValueString()
+
+	hooks, err := r.getHooks(ctx, projectID, flow, timing, authMethod)
+	if err != nil {
+		resp.Diagnostics.AddError("Error Getting Hooks", err.Error())
+		return
+	}
+
+	index := r.findHookIndex(hooks, url, httpMethod)
+	if index < 0 {
+		resp.Diagnostics.AddError("Hook Not Found",
+			fmt.Sprintf("Hook not found at %s/%s/%s with URL %s", flow, timing, authMethod, url))
+		return
+	}
+
+	hookValue := r.buildHookValue(&plan)
+	hookPath := r.hookPath(flow, timing, authMethod)
+
+	patches := []ory.JsonPatch{{
+		Op:    "replace",
+		Path:  fmt.Sprintf("%s/%d", hookPath, index),
+		Value: hookValue,
+	}}
+
+	_, err = r.client.PatchProject(ctx, projectID, patches)
+	if err != nil {
+		resp.Diagnostics.AddError("Error Updating Action", err.Error())
+		return
+	}
+
+	plan.ID = types.StringValue(fmt.Sprintf("%s:%s:%s:%s:%s", projectID, flow, timing, authMethod, plan.URL.ValueString()))
+	plan.ProjectID = types.StringValue(projectID)
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
+}
+
+func (r *ActionResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var state ActionResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	projectID := state.ProjectID.ValueString()
+	flow := state.Flow.ValueString()
+	timing := state.Timing.ValueString()
+	authMethod := state.AuthMethod.ValueString()
+	url := state.URL.ValueString()
+	httpMethod := state.HTTPMethod.ValueString()
+
+	hooks, err := r.getHooks(ctx, projectID, flow, timing, authMethod)
+	if err != nil {
+		resp.Diagnostics.AddError("Error Getting Hooks", err.Error())
+		return
+	}
+
+	index := r.findHookIndex(hooks, url, httpMethod)
+	if index < 0 {
+		return // Already deleted
+	}
+
+	hookPath := r.hookPath(flow, timing, authMethod)
+	patches := []ory.JsonPatch{{
+		Op:   "remove",
+		Path: fmt.Sprintf("%s/%d", hookPath, index),
+	}}
+
+	_, err = r.client.PatchProject(ctx, projectID, patches)
+	if err != nil {
+		resp.Diagnostics.AddError("Error Deleting Action", err.Error())
+		return
+	}
+}
+
+func (r *ActionResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	// Import format: project_id:flow:timing:auth_method:url
+	parts := strings.SplitN(req.ID, ":", 5)
+	if len(parts) != 5 {
+		resp.Diagnostics.AddError("Invalid Import ID",
+			"Import ID must be in format: project_id:flow:timing:auth_method:url")
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("project_id"), parts[0])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("flow"), parts[1])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("timing"), parts[2])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("auth_method"), parts[3])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("url"), parts[4])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("method"), "POST")...)
+}

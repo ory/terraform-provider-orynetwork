@@ -1,0 +1,36 @@
+#!/bin/bash
+# Pre-commit hook for terraform-provider-orynetwork
+
+set -e
+
+echo "Running pre-commit checks..."
+
+# Format check
+echo "Checking formatting..."
+if [ -n "$(gofmt -l .)" ]; then
+    echo "Error: The following files are not formatted:"
+    gofmt -l .
+    echo ""
+    echo "Run 'make fmt' to fix formatting."
+    exit 1
+fi
+
+# Vet
+echo "Running go vet..."
+go vet ./...
+
+# Lint
+echo "Running golangci-lint..."
+if command -v golangci-lint &> /dev/null; then
+    golangci-lint run
+elif [ -x "$(go env GOPATH)/bin/golangci-lint" ]; then
+    "$(go env GOPATH)/bin/golangci-lint" run
+else
+    echo "Warning: golangci-lint not found, skipping. Install with: make tools"
+fi
+
+# Build check
+echo "Checking build..."
+go build ./...
+
+echo "All pre-commit checks passed!"

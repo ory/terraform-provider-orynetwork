@@ -1,0 +1,286 @@
+// Copyright 2025 Materialize Inc. and contributors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package emailtemplate
+
+import (
+	"context"
+	"encoding/base64"
+	"fmt"
+	"strings"
+
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+	ory "github.com/ory/client-go"
+
+	"github.com/jasonhernandez/terraform-provider-orynetwork/internal/client"
+)
+
+var validTemplateTypes = []string{
+	"recovery_code_valid",
+	"recovery_code_invalid",
+	"recovery_valid",
+	"recovery_invalid",
+	"verification_code_valid",
+	"verification_code_invalid",
+	"verification_valid",
+	"verification_invalid",
+	"login_code_valid",
+	"login_code_invalid",
+	"registration_code_valid",
+	"registration_code_invalid",
+}
+
+var (
+	_ resource.Resource                = &EmailTemplateResource{}
+	_ resource.ResourceWithConfigure   = &EmailTemplateResource{}
+	_ resource.ResourceWithImportState = &EmailTemplateResource{}
+)
+
+func NewResource() resource.Resource {
+	return &EmailTemplateResource{}
+}
+
+type EmailTemplateResource struct {
+	client *client.OryClient
+}
+
+type EmailTemplateResourceModel struct {
+	ID            types.String `tfsdk:"id"`
+	ProjectID     types.String `tfsdk:"project_id"`
+	TemplateType  types.String `tfsdk:"template_type"`
+	Subject       types.String `tfsdk:"subject"`
+	BodyHTML      types.String `tfsdk:"body_html"`
+	BodyPlaintext types.String `tfsdk:"body_plaintext"`
+}
+
+func (r *EmailTemplateResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_email_template"
+}
+
+func (r *EmailTemplateResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		Description: "Manages an Ory Network email template.",
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Description: "Resource ID (same as template_type).",
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"project_id": schema.StringAttribute{
+				Description: "Project ID. If not set, uses provider's project_id.",
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"template_type": schema.StringAttribute{
+				Description: "Template type (e.g., recovery_code_valid, verification_valid).",
+				Required:    true,
+				Validators: []validator.String{
+					stringvalidator.OneOf(validTemplateTypes...),
+				},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"subject": schema.StringAttribute{
+				Description: "Email subject template (Go template syntax).",
+				Optional:    true,
+			},
+			"body_html": schema.StringAttribute{
+				Description: "HTML body template (Go template syntax).",
+				Required:    true,
+			},
+			"body_plaintext": schema.StringAttribute{
+				Description: "Plaintext body template (Go template syntax).",
+				Required:    true,
+			},
+		},
+	}
+}
+
+func (r *EmailTemplateResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+	oryClient, ok := req.ProviderData.(*client.OryClient)
+	if !ok {
+		resp.Diagnostics.AddError("Unexpected Resource Configure Type",
+			fmt.Sprintf("Expected *client.OryClient, got: %T", req.ProviderData))
+		return
+	}
+	r.client = oryClient
+}
+
+func encodeTemplate(content string) string {
+	return "base64://" + base64.StdEncoding.EncodeToString([]byte(content))
+}
+
+func (r *EmailTemplateResource) templatePath(templateType string) string {
+	// Map template type to config path (e.g., "recovery_code_valid" -> "recovery_code/valid")
+	parts := strings.Split(templateType, "_")
+	if len(parts) >= 2 {
+		validity := parts[len(parts)-1]
+		if validity == "valid" || validity == "invalid" {
+			prefix := strings.Join(parts[:len(parts)-1], "_")
+			return fmt.Sprintf("%s/%s", prefix, validity)
+		}
+	}
+	return templateType
+}
+
+func (r *EmailTemplateResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var plan EmailTemplateResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	projectID := plan.ProjectID.ValueString()
+	if projectID == "" {
+		projectID = r.client.ProjectID()
+	}
+
+	templatePath := r.templatePath(plan.TemplateType.ValueString())
+	basePath := fmt.Sprintf("/services/identity/config/courier/smtp/templates/%s/email", templatePath)
+
+	htmlEncoded := encodeTemplate(plan.BodyHTML.ValueString())
+	plaintextEncoded := encodeTemplate(plan.BodyPlaintext.ValueString())
+
+	patches := []ory.JsonPatch{
+		{
+			Op:   "add",
+			Path: basePath + "/body",
+			Value: map[string]string{
+				"html":      htmlEncoded,
+				"plaintext": plaintextEncoded,
+			},
+		},
+	}
+
+	if !plan.Subject.IsNull() && !plan.Subject.IsUnknown() {
+		patches = append(patches, ory.JsonPatch{
+			Op:    "add",
+			Path:  basePath + "/subject",
+			Value: encodeTemplate(plan.Subject.ValueString()),
+		})
+	}
+
+	_, err := r.client.PatchProject(ctx, projectID, patches)
+	if err != nil {
+		resp.Diagnostics.AddError("Error Creating Email Template", err.Error())
+		return
+	}
+
+	plan.ID = plan.TemplateType
+	plan.ProjectID = types.StringValue(projectID)
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
+}
+
+func (r *EmailTemplateResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var state EmailTemplateResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Email templates always exist once set, nothing special to read back
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+func (r *EmailTemplateResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan EmailTemplateResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	projectID := plan.ProjectID.ValueString()
+	if projectID == "" {
+		projectID = r.client.ProjectID()
+	}
+
+	templatePath := r.templatePath(plan.TemplateType.ValueString())
+	basePath := fmt.Sprintf("/services/identity/config/courier/smtp/templates/%s/email", templatePath)
+
+	htmlEncoded := encodeTemplate(plan.BodyHTML.ValueString())
+	plaintextEncoded := encodeTemplate(plan.BodyPlaintext.ValueString())
+
+	patches := []ory.JsonPatch{
+		{
+			Op:   "replace",
+			Path: basePath + "/body",
+			Value: map[string]string{
+				"html":      htmlEncoded,
+				"plaintext": plaintextEncoded,
+			},
+		},
+	}
+
+	if !plan.Subject.IsNull() && !plan.Subject.IsUnknown() {
+		patches = append(patches, ory.JsonPatch{
+			Op:    "replace",
+			Path:  basePath + "/subject",
+			Value: encodeTemplate(plan.Subject.ValueString()),
+		})
+	}
+
+	_, err := r.client.PatchProject(ctx, projectID, patches)
+	if err != nil {
+		resp.Diagnostics.AddError("Error Updating Email Template", err.Error())
+		return
+	}
+
+	plan.ID = plan.TemplateType
+	plan.ProjectID = types.StringValue(projectID)
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
+}
+
+func (r *EmailTemplateResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var state EmailTemplateResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	projectID := state.ProjectID.ValueString()
+	templatePath := r.templatePath(state.TemplateType.ValueString())
+	basePath := fmt.Sprintf("/services/identity/config/courier/smtp/templates/%s", templatePath)
+
+	// Try to remove the template (resets to Ory defaults)
+	patches := []ory.JsonPatch{{
+		Op:   "remove",
+		Path: basePath,
+	}}
+
+	// Ignore errors - the path might not exist
+	_, _ = r.client.PatchProject(ctx, projectID, patches)
+}
+
+func (r *EmailTemplateResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("template_type"), req.ID)...)
+}
