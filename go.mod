@@ -1,4 +1,4 @@
-module github.com/jasonhernandez/terraform-provider-orynetwork
+module github.com/ory/terraform-provider-orynetwork
 
 go 1.24.0
 

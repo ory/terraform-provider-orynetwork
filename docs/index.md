@@ -17,7 +17,7 @@ The Ory provider enables Terraform to manage [Ory Network](https://www.ory.sh/) 
 terraform {
   required_providers {
     ory = {
-      source  = "jasonhernandez/orynetwork"
+      source  = "ory/terraform-provider-orynetwork"
       version = "~> 0.1"
     }
   }
@@ -39,10 +39,10 @@ provider "ory" {
 
 Ory Network uses two types of API keys:
 
-| Key Type | Prefix | Purpose |
-|----------|--------|---------|
+| Key Type          | Prefix        | Purpose                                       |
+| ----------------- | ------------- | --------------------------------------------- |
 | Workspace API Key | `ory_wak_...` | Projects, organizations, workspace management |
-| Project API Key | `ory_pat_...` | Identities, OAuth2 clients, relationships |
+| Project API Key   | `ory_pat_...` | Identities, OAuth2 clients, relationships     |
 
 ### Creating API Keys
 

@@ -1,11 +1,10 @@
 # Terraform Provider for Ory Network
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/jasonhernandez/terraform-provider-orynetwork.svg)](https://pkg.go.dev/github.com/jasonhernandez/terraform-provider-orynetwork)
-[![Go Report Card](https://goreportcard.com/badge/github.com/jasonhernandez/terraform-provider-orynetwork)](https://goreportcard.com/report/github.com/jasonhernandez/terraform-provider-orynetwork)
+[![Go Reference](https://pkg.go.dev/badge/github.com/ory/terraform-provider-orynetwork.svg)](https://pkg.go.dev/github.com/ory/terraform-provider-orynetwork)
+[![Go Report Card](https://goreportcard.com/badge/github.com/ory/terraform-provider-orynetwork)](https://goreportcard.com/report/github.com/ory/terraform-provider-orynetwork)
 
-> **Warning**
-> This is an experimental project under active development. APIs and functionality may change without notice.
-> You should check if Ory has an official fork or Terraform provider before using this experimental provider.
+> **Special Thanks**
+> Shoutout to [Jason Hernandez](https://github.com/jasonhernandez) and the [Materialize](https://materialize.com/) team for creating the initial version of this provider! Also see [NOTICE.md](./NOTICE.md)
 
 ## License
 
@@ -40,7 +39,7 @@ A Terraform provider for managing [Ory Network](https://www.ory.sh/) resources u
 terraform {
   required_providers {
     ory = {
-      source  = "jasonhernandez/orynetwork"
+      source  = "ory/terraform-provider-orynetwork"
       version = "~> 0.1"
     }
   }
@@ -50,7 +49,7 @@ terraform {
 ### From Source
 
 ```bash
-git clone https://github.com/jasonhernandez/terraform-provider-orynetwork.git
+git clone https://github.com/ory/terraform-provider-orynetwork.git
 cd terraform-provider-orynetwork
 go build -o terraform-provider-orynetwork
 ```
@@ -61,7 +60,7 @@ Then configure Terraform to use the local provider:
 # ~/.terraformrc
 provider_installation {
   dev_overrides {
-    "jasonhernandez/orynetwork" = "/path/to/terraform-provider-orynetwork"
+    "ory/terraform-provider-orynetwork" = "/path/to/terraform-provider-orynetwork"
   }
   direct {}
 }
@@ -71,10 +70,10 @@ provider_installation {
 
 Ory Network uses two types of API keys:
 
-| Key Type | Prefix | Purpose |
-|----------|--------|---------|
+| Key Type          | Prefix        | Purpose                                       |
+| ----------------- | ------------- | --------------------------------------------- |
 | Workspace API Key | `ory_wak_...` | Projects, organizations, workspace management |
-| Project API Key | `ory_pat_...` | Identities, OAuth2 clients, relationships |
+| Project API Key   | `ory_pat_...` | Identities, OAuth2 clients, relationships     |
 
 ### Environment Variables (Recommended)
 
@@ -102,7 +101,7 @@ provider "ory" {
 terraform {
   required_providers {
     ory = {
-      source = "jasonhernandez/orynetwork"
+      source = "ory/terraform-provider-orynetwork"
     }
   }
 }
@@ -137,26 +136,26 @@ resource "ory_action" "welcome_email" {
 
 ## Resources
 
-| Resource | Description |
-|----------|-------------|
-| [`ory_project`](docs/resources/project.md) | Ory Network projects |
-| [`ory_workspace`](docs/resources/workspace.md) | Ory workspaces |
-| [`ory_organization`](docs/resources/organization.md) | Organizations for multi-tenancy |
-| [`ory_identity`](docs/resources/identity.md) | User identities |
-| [`ory_identity_schema`](docs/resources/identity_schema.md) | Custom identity schemas |
-| [`ory_oauth2_client`](docs/resources/oauth2_client.md) | OAuth2/OIDC client applications |
-| [`ory_project_config`](docs/resources/project_config.md) | Project configuration settings |
-| [`ory_action`](docs/resources/action.md) | Webhooks for identity flows |
-| [`ory_social_provider`](docs/resources/social_provider.md) | Social sign-in providers |
-| [`ory_email_template`](docs/resources/email_template.md) | Email template customization |
-| [`ory_project_api_key`](docs/resources/project_api_key.md) | Project API keys |
-| [`ory_json_web_key_set`](docs/resources/json_web_key_set.md) | JSON Web Key Sets for signing |
-| [`ory_relationship`](docs/resources/relationship.md) | Ory Permissions (Keto) relationships |
+| Resource                                                     | Description                          |
+| ------------------------------------------------------------ | ------------------------------------ |
+| [`ory_project`](docs/resources/project.md)                   | Ory Network projects                 |
+| [`ory_workspace`](docs/resources/workspace.md)               | Ory workspaces                       |
+| [`ory_organization`](docs/resources/organization.md)         | Organizations for multi-tenancy      |
+| [`ory_identity`](docs/resources/identity.md)                 | User identities                      |
+| [`ory_identity_schema`](docs/resources/identity_schema.md)   | Custom identity schemas              |
+| [`ory_oauth2_client`](docs/resources/oauth2_client.md)       | OAuth2/OIDC client applications      |
+| [`ory_project_config`](docs/resources/project_config.md)     | Project configuration settings       |
+| [`ory_action`](docs/resources/action.md)                     | Webhooks for identity flows          |
+| [`ory_social_provider`](docs/resources/social_provider.md)   | Social sign-in providers             |
+| [`ory_email_template`](docs/resources/email_template.md)     | Email template customization         |
+| [`ory_project_api_key`](docs/resources/project_api_key.md)   | Project API keys                     |
+| [`ory_json_web_key_set`](docs/resources/json_web_key_set.md) | JSON Web Key Sets for signing        |
+| [`ory_relationship`](docs/resources/relationship.md)         | Ory Permissions (Keto) relationships |
 
 ## Data Sources
 
-| Data Source | Description |
-|-------------|-------------|
+| Data Source                                   | Description              |
+| --------------------------------------------- | ------------------------ |
 | [`ory_project`](docs/data-sources/project.md) | Read project information |
 
 ## Examples
@@ -274,15 +273,15 @@ resource "ory_email_template" "recovery" {
 
 ## Known Limitations
 
-| Resource | Limitation |
-|----------|------------|
-| `ory_organization` | Requires B2B features AND project environment must be `prod` or `stage` (not `dev`) |
-| `ory_identity_schema` | Immutable - content cannot be updated after creation |
-| `ory_identity_schema` | Delete not supported by Ory API (resource removed from state only) |
-| `ory_workspace` | Delete not supported by Ory API |
-| `ory_oauth2_client` | `client_secret` only returned on create |
-| `ory_email_template` | Delete resets to Ory defaults |
-| `ory_relationship` | Requires Ory Permissions (Keto) to be enabled |
+| Resource              | Limitation                                                                          |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| `ory_organization`    | Requires B2B features AND project environment must be `prod` or `stage` (not `dev`) |
+| `ory_identity_schema` | Immutable - content cannot be updated after creation                                |
+| `ory_identity_schema` | Delete not supported by Ory API (resource removed from state only)                  |
+| `ory_workspace`       | Delete not supported by Ory API                                                     |
+| `ory_oauth2_client`   | `client_secret` only returned on create                                             |
+| `ory_email_template`  | Delete resets to Ory defaults                                                       |
+| `ory_relationship`    | Requires Ory Permissions (Keto) to be enabled                                       |
 
 ## Development
 
@@ -323,32 +322,32 @@ TF_ACC=1 go test ./internal/resources/projectconfig/... -v
 
 Some tests require additional environment variables or specific Ory plan features:
 
-| Environment Variable | Purpose | Default |
-|---------------------|---------|---------|
-| `TF_ACC=1` | Enable acceptance tests | Required |
-| `ORY_B2B_ENABLED=true` | Run Organization tests (requires B2B plan) | Skipped |
-| `ORY_SCHEMA_TESTS_ENABLED=true` | Run IdentitySchema tests (schemas can't be deleted) | Skipped |
-| `ORY_PROJECT_TESTS_ENABLED=true` | Run Project create/delete tests | Skipped |
-| `ORY_WORKSPACE_TESTS_ENABLED=true` | Run Workspace tests (can't be deleted) | Skipped |
-| `ORY_WORKSPACE_ID=...` | Workspace ID for import tests | Skipped |
-| `ORY_KETO_TESTS_ENABLED=true` | Run Relationship tests (requires Keto) | Skipped |
-| `ORY_SOCIAL_PROVIDER_TESTS_ENABLED=true` | Run social provider tests | Skipped |
+| Environment Variable                     | Purpose                                             | Default  |
+| ---------------------------------------- | --------------------------------------------------- | -------- |
+| `TF_ACC=1`                               | Enable acceptance tests                             | Required |
+| `ORY_B2B_ENABLED=true`                   | Run Organization tests (requires B2B plan)          | Skipped  |
+| `ORY_SCHEMA_TESTS_ENABLED=true`          | Run IdentitySchema tests (schemas can't be deleted) | Skipped  |
+| `ORY_PROJECT_TESTS_ENABLED=true`         | Run Project create/delete tests                     | Skipped  |
+| `ORY_WORKSPACE_TESTS_ENABLED=true`       | Run Workspace tests (can't be deleted)              | Skipped  |
+| `ORY_WORKSPACE_ID=...`                   | Workspace ID for import tests                       | Skipped  |
+| `ORY_KETO_TESTS_ENABLED=true`            | Run Relationship tests (requires Keto)              | Skipped  |
+| `ORY_SOCIAL_PROVIDER_TESTS_ENABLED=true` | Run social provider tests                           | Skipped  |
 
 #### Test Coverage by Plan
 
-| Test Suite | Free Plan | Growth Plan | Enterprise |
-|------------|-----------|-------------|------------|
-| Identity | ✅ | ✅ | ✅ |
-| OAuth2 Client | ✅ | ✅ | ✅ |
-| Project Config | ✅ | ✅ | ✅ |
-| Action (webhooks) | ✅ | ✅ | ✅ |
-| Email Template | ✅ | ✅ | ✅ |
-| Social Provider | ✅ | ✅ | ✅ |
-| JWK | ✅ | ✅ | ✅ |
-| Organization | ❌ | ✅* | ✅ |
-| Relationship (Keto) | ❌ | ✅ | ✅ |
+| Test Suite          | Free Plan | Growth Plan | Enterprise |
+| ------------------- | --------- | ----------- | ---------- |
+| Identity            | ✅        | ✅          | ✅         |
+| OAuth2 Client       | ✅        | ✅          | ✅         |
+| Project Config      | ✅        | ✅          | ✅         |
+| Action (webhooks)   | ✅        | ✅          | ✅         |
+| Email Template      | ✅        | ✅          | ✅         |
+| Social Provider     | ✅        | ✅          | ✅         |
+| JWK                 | ✅        | ✅          | ✅         |
+| Organization        | ❌        | ✅\*        | ✅         |
+| Relationship (Keto) | ❌        | ✅          | ✅         |
 
-*Organizations require B2B features to be enabled on your plan.
+\*Organizations require B2B features to be enabled on your plan.
 
 ### Generating Documentation
 

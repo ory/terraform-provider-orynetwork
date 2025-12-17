@@ -14,7 +14,7 @@ Thank you for your interest in contributing to the Ory Terraform Provider!
 
 ```bash
 # Clone the repository
-git clone https://github.com/jasonhernandez/terraform-provider-orynetwork.git
+git clone https://github.com/ory/terraform-provider-orynetwork.git
 cd terraform-provider-orynetwork
 
 # Install development tools and set up git hooks
@@ -49,7 +49,7 @@ To use a locally built provider, create a `~/.terraformrc` file:
 ```hcl
 provider_installation {
   dev_overrides {
-    "jasonhernandez/orynetwork" = "/path/to/terraform-provider-orynetwork"
+    "ory/terraform-provider-orynetwork" = "/path/to/terraform-provider-orynetwork"
   }
   direct {}
 }
@@ -103,6 +103,7 @@ Add ory_foo resource for managing foos
 6. Submit a pull request
 
 Please include:
+
 - Description of the changes
 - Link to any related issues
 - Test results or screenshots if applicable
@@ -121,4 +122,3 @@ When reporting issues, please include:
 ## Code of Conduct
 
 Please be respectful and constructive in all interactions. We're all here to build something useful together.
-
