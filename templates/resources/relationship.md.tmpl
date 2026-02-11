@@ -1,0 +1,74 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+  Manages an Ory Keto relationship tuple for fine-grained authorization.
+---
+
+# {{.Name}} ({{.Type}})
+
+Manages an Ory Keto relationship tuple for fine-grained authorization.
+
+Relationships are the foundation of Ory Permissions (Keto), which implements [Google's Zanzibar](https://research.google/pubs/pub48190/) authorization model. They define who (subject) has what relation to which resource (object) in a namespace.
+
+## Prerequisites
+
+~> **Important:** You must configure Keto namespaces via `ory_project_config` **before** creating relationships. If the namespace doesn't exist, the API will return a 404 error.
+
+```terraform
+resource "ory_project_config" "main" {
+  keto_namespaces = ["documents", "folders", "groups"]
+}
+
+resource "ory_relationship" "example" {
+  namespace  = "documents"
+  object     = "doc-123"
+  relation   = "viewer"
+  subject_id = "user-456"
+
+  depends_on = [ory_project_config.main]
+}
+```
+
+## Relationship Tuple Structure
+
+A relationship tuple consists of:
+- **namespace**: The type of resource (e.g., `documents`, `folders`) — must be configured in `keto_namespaces`
+- **object**: The specific resource ID
+- **relation**: The type of relationship (e.g., `viewer`, `editor`, `owner`)
+- **subject**: Either a user ID (`subject_id`) or another relationship tuple (`subject_set_*`)
+
+~> **Note:** `subject_id` and `subject_set_*` attributes are mutually exclusive. You must provide either `subject_id` (for a direct user) or all three `subject_set_*` attributes (for an inherited permission), but not both.
+
+## Example Usage
+
+{{ tffile "examples/resources/ory_relationship/resource.tf" }}
+
+## Important Behaviors
+
+- **Relationships are immutable.** Any change to any field forces a new resource (destroy + create).
+- **All three `subject_set_*` fields must be set together.** Setting only `subject_set_namespace` without `subject_set_object` and `subject_set_relation` will produce an error.
+
+## Import
+
+Import using Zanzibar-style tuple notation:
+
+```shell
+# Simple subject (user ID)
+terraform import ory_relationship.example "namespace:object#relation@subject_id"
+
+# Subject set (inherited permission)
+terraform import ory_relationship.example "namespace:object#relation@subject_namespace:subject_object#subject_relation"
+```
+
+### Examples
+
+```shell
+# user-456 is a viewer of doc-123 in documents namespace
+terraform import ory_relationship.user_can_view "documents:doc-123#viewer@user-456"
+
+# editors of folder-789 are viewers of doc-123
+terraform import ory_relationship.editors_can_view "documents:doc-123#viewer@folders:folder-789#editor"
+```
+
+{{ .SchemaMarkdown | trimspace }}

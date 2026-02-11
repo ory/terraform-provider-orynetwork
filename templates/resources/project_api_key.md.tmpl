@@ -1,0 +1,40 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+  Manages an Ory Network project API key.
+---
+
+# {{.Name}} ({{.Type}})
+
+Manages an Ory Network project API key.
+
+API keys are used to authenticate API requests to a specific project. They are scoped to a single project and provide the same level of access as the project owner.
+
+~> **Important:** The `value` (the actual API key string) is **only returned when the key is created**. It cannot be retrieved afterward. Store it securely immediately after creation (e.g., in a secrets manager or as a sensitive output).
+
+## Example Usage
+
+{{ tffile "examples/resources/ory_project_api_key/resource.tf" }}
+
+## Important Behaviors
+
+- **Value is create-only.** The API key string is returned only on creation. Subsequent reads and plans will show the stored value from state but cannot refresh it from the API. If you lose the state, you lose the key.
+- **Keys cannot be updated.** Changing `name` or `expires_at` after creation is not possible. All mutable-looking fields actually require replacement.
+- **Read uses list API.** There is no direct "get by ID" endpoint. The provider lists all project API keys and filters by ID, which works but may be slower for projects with many keys.
+
+## Import
+
+Import using the API key ID, or a `project_id/key_id` pair:
+
+```shell
+# Using provider's default project_id
+terraform import ory_project_api_key.backend <key-id>
+
+# Specifying the project explicitly
+terraform import ory_project_api_key.backend <project-id>/<key-id>
+```
+
+~> **Note:** After import, the `value` field will be empty because the API does not return key values. The key will still function, but Terraform state will not contain the secret.
+
+{{ .SchemaMarkdown | trimspace }}

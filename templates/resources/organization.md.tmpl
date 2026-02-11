@@ -1,0 +1,42 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+  Manages an Ory Network organization for multi-tenant B2B applications.
+---
+
+# {{.Name}} ({{.Type}})
+
+Manages an Ory Network organization.
+
+Organizations represent tenants in a multi-tenant application. They can have associated SSO domains for automatic user routing and contain users (identities).
+
+~> **Important:** Organizations require:
+- An Ory Network **Growth plan or higher** with B2B features enabled
+- The Terraform provider validates that the project environment is `prod` or `stage`. The `dev` environment is blocked by the provider, though the API may accept it in some cases.
+
+## Example Usage
+
+{{ tffile "examples/resources/ory_organization/resource.tf" }}
+
+## Domains
+
+The `domains` attribute is a list of email domains used for SSO routing. When a user signs in with an email matching one of these domains, they are automatically routed to this organization's SSO provider.
+
+-> **Note:** Setting `domains` to `[]` and omitting `domains` entirely are treated differently in state. If you don't need domains, omit the attribute rather than setting it to an empty list to avoid plan drift.
+
+## Import
+
+Organizations can be imported using the organization ID (uses the provider's `project_id`):
+
+```shell
+terraform import ory_organization.acme <organization-id>
+```
+
+Or with an explicit project ID:
+
+```shell
+terraform import ory_organization.acme <project-id>/<organization-id>
+```
+
+{{ .SchemaMarkdown | trimspace }}

@@ -1,0 +1,61 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+  Manages an Ory Network JSON Web Key Set (JWKS).
+---
+
+# {{.Name}} ({{.Type}})
+
+Manages an Ory Network JSON Web Key Set (JWKS).
+
+JSON Web Keys are used for signing and encrypting tokens. This resource generates and manages custom key sets for your Ory project's OAuth2/OIDC service (Hydra).
+
+~> **Note:** This resource is **immutable**. Any change to `set_id`, `key_id`, `algorithm`, or `use` will destroy the existing key set and create a new one. Private keys in the old set will be permanently lost.
+
+## Algorithms
+
+| Algorithm | Type | Description |
+|-----------|------|-------------|
+| `RS256` | RSA | RSA with SHA-256 — widely supported, good default for signing |
+| `ES256` | ECDSA | Elliptic curve P-256 — smaller keys, faster than RSA |
+| `ES512` | ECDSA | Elliptic curve P-521 — stronger but slower than ES256 |
+| `HS256` | HMAC | Symmetric — uses shared secret, not suitable for public verification |
+| `HS512` | HMAC | Symmetric — stronger HMAC variant |
+
+## Example Usage
+
+{{ tffile "examples/resources/ory_json_web_key_set/resource.tf" }}
+
+## Keys Output
+
+The `keys` attribute contains the JSON Web Key Set as a JSON string with **public parts only**. Private keys are never exposed in Terraform state. The output follows the standard JWKS format:
+
+```json
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "kid": "sig-key-1",
+      "use": "sig",
+      "alg": "RS256",
+      "n": "...",
+      "e": "..."
+    }
+  ]
+}
+```
+
+On read, the provider extracts `algorithm`, `use`, and `key_id` from the **first key** in the set.
+
+## Import
+
+Import using the set ID:
+
+```shell
+terraform import ory_json_web_key_set.signing token-signing-keys
+```
+
+After import, `key_id` is populated from the first key in the set. If the set contains multiple keys, only the first key's metadata is tracked.
+
+{{ .SchemaMarkdown | trimspace }}

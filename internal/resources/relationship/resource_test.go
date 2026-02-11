@@ -7,7 +7,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 
-	"github.com/ory/terraform-provider-orynetwork/internal/acctest"
+	"github.com/ory/terraform-provider-ory/internal/acctest"
 )
 
 func TestAccRelationshipResource_basic(t *testing.T) {
@@ -27,6 +27,13 @@ func TestAccRelationshipResource_basic(t *testing.T) {
 					resource.TestCheckResourceAttr("ory_relationship.test", "relation", "viewer"),
 					resource.TestCheckResourceAttr("ory_relationship.test", "subject_id", "user-456"),
 				),
+			},
+			// Import using the composite ID format: namespace:object#relation@subject_id
+			{
+				ResourceName:      "ory_relationship.test",
+				ImportState:       true,
+				ImportStateId:     "documents:doc-123#viewer@user-456",
+				ImportStateVerify: true,
 			},
 		},
 	})

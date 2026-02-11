@@ -10,7 +10,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 
-	"github.com/ory/terraform-provider-orynetwork/internal/acctest"
+	"github.com/ory/terraform-provider-ory/internal/acctest"
 )
 
 func testAccPreCheck(t *testing.T) {
@@ -29,6 +29,7 @@ func testAccPreCheck(t *testing.T) {
 // Only run this test if you have quota available and understand the implications.
 func TestAccProjectResource_basic(t *testing.T) {
 	projectName := testProjectName("basic")
+	updatedName := projectName + "-updated"
 	acctest.RunTest(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: acctest.TestAccProtoV6ProviderFactories(),
@@ -49,6 +50,15 @@ func TestAccProjectResource_basic(t *testing.T) {
 				ResourceName:      "ory_project.test",
 				ImportState:       true,
 				ImportStateVerify: true,
+			},
+			// Update name
+			{
+				Config: testAccProjectResourceConfig(updatedName, "dev"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("ory_project.test", "id"),
+					resource.TestCheckResourceAttr("ory_project.test", "name", updatedName),
+					resource.TestCheckResourceAttr("ory_project.test", "environment", "dev"),
+				),
 			},
 		},
 	})

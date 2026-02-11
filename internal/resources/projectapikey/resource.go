@@ -3,6 +3,7 @@ package projectapikey
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -13,7 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	ory "github.com/ory/client-go"
 
-	"github.com/ory/terraform-provider-orynetwork/internal/client"
+	"github.com/ory/terraform-provider-ory/internal/client"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
@@ -94,13 +95,16 @@ resource "ory_project_api_key" "temporary" {
 				Optional:    true,
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
 					stringplanmodifier.UseStateForUnknown(),
+					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"name": schema.StringAttribute{
 				Description: "A descriptive name for the API key.",
 				Required:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
 			},
 			"expires_at": schema.StringAttribute{
 				Description: "Optional expiration time in RFC3339 format (e.g., 2025-12-31T23:59:59Z).",
@@ -303,5 +307,20 @@ func (r *ProjectAPIKeyResource) Delete(ctx context.Context, req resource.DeleteR
 }
 
 func (r *ProjectAPIKeyResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
+	// Import ID format: project_id/key_id or just key_id (uses provider's project_id)
+	id := req.ID
+	var projectID, keyID string
+
+	if strings.Contains(id, "/") {
+		parts := strings.SplitN(id, "/", 2)
+		projectID = parts[0]
+		keyID = parts[1]
+	} else {
+		keyID = id
+	}
+
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), keyID)...)
+	if projectID != "" {
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("project_id"), projectID)...)
+	}
 }

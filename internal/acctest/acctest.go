@@ -14,8 +14,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	ory "github.com/ory/client-go"
 
-	"github.com/ory/terraform-provider-orynetwork/internal/client"
-	"github.com/ory/terraform-provider-orynetwork/internal/provider"
+	"github.com/ory/terraform-provider-ory/internal/client"
+	"github.com/ory/terraform-provider-ory/internal/provider"
 )
 
 // TestProject holds information about a test project created for acceptance tests.
@@ -24,7 +24,7 @@ type TestProject struct {
 	Slug        string
 	Name        string
 	Environment string
-	APIKey      string
+	APIKey      string // #nosec G117 -- test-only struct field, not a credential
 }
 
 var (
@@ -163,7 +163,8 @@ func createSharedProject(t *testing.T) {
 	t.Logf("Creating test project: %s (environment: prod)", projectName)
 
 	// Create as "prod" environment to support all features including organizations
-	project, err := c.CreateProject(ctx, projectName, "prod")
+	// Empty home_region uses the default (eu-central)
+	project, _, err := c.CreateProject(ctx, projectName, "prod", "")
 	if err != nil {
 		initError = fmt.Errorf("failed to create test project: %w", err)
 		return
