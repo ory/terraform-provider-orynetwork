@@ -299,7 +299,6 @@ func (r *IdentitySchemaResource) Create(ctx context.Context, req resource.Create
 	// internally assign a different ID (e.g., hash-based). A fresh GetProject
 	// returns the canonical IDs.
 	var actualID string
-	var resolutionMethod string // Track which strategy succeeded for diagnostics
 	err = helpers.WaitForCondition(ctx, func() (bool, error) {
 		freshSchemas, err := r.getSchemas(ctx, projectID)
 		if err != nil {
@@ -310,7 +309,6 @@ func (r *IdentitySchemaResource) Create(ctx context.Context, req resource.Create
 		if idx := r.findSchemaIndex(freshSchemas, schemaID); idx >= 0 {
 			if id, ok := freshSchemas[idx]["id"].(string); ok {
 				actualID = id
-				resolutionMethod = "by schema_id"
 				return true, nil
 			}
 		}
@@ -319,7 +317,6 @@ func (r *IdentitySchemaResource) Create(ctx context.Context, req resource.Create
 		if idx := r.findSchemaByURL(freshSchemas, schemaURL); idx >= 0 {
 			if id, ok := freshSchemas[idx]["id"].(string); ok {
 				actualID = id
-				resolutionMethod = "by URL match"
 				return true, nil
 			}
 		}
@@ -329,7 +326,6 @@ func (r *IdentitySchemaResource) Create(ctx context.Context, req resource.Create
 			if id, ok := s["id"].(string); ok {
 				if !existingIDs[id] {
 					actualID = id
-					resolutionMethod = "by new ID detection"
 					return true, nil
 				}
 			}
@@ -338,8 +334,8 @@ func (r *IdentitySchemaResource) Create(ctx context.Context, req resource.Create
 		return false, nil
 	})
 	if err != nil || actualID == "" {
-		// Fallback: use user-provided schemaID if we can't resolve via API
-		// This can happen if the API has eventual consistency issues
+		// Fallback: use user-provided schemaID if we can't resolve via API.
+		// This can happen with API eventual consistency issues.
 		resp.Diagnostics.AddWarning(
 			"Schema ID Resolution Fallback",
 			fmt.Sprintf("Could not resolve canonical schema ID from API (err: %v). "+
@@ -348,16 +344,6 @@ func (r *IdentitySchemaResource) Create(ctx context.Context, req resource.Create
 				err, schemaID),
 		)
 		actualID = schemaID
-		resolutionMethod = "fallback to user-provided"
-	}
-
-	// Log successful resolution for debugging eventual consistency issues
-	if resolutionMethod != "fallback to user-provided" && resolutionMethod != "by schema_id" {
-		resp.Diagnostics.AddWarning(
-			"Schema ID Resolved via Fallback Strategy",
-			fmt.Sprintf("Schema ID was resolved %s. This indicates potential API eventual "+
-				"consistency issues. Resolved ID: %s", resolutionMethod, actualID),
-		)
 	}
 
 	plan.ID = types.StringValue(actualID)
