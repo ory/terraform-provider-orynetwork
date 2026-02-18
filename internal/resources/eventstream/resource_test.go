@@ -38,8 +38,12 @@ func testAccPreCheckEventStream(t *testing.T) {
 //
 // Required environment variables:
 //
-//	ORY_EVENT_STREAM_TOPIC_ARN - Real AWS SNS topic ARN
-//	ORY_EVENT_STREAM_ROLE_ARN  - Real AWS IAM role ARN with trust policy for Ory
+//	ORY_EVENT_STREAM_TOPIC_ARN - Real AWS SNS topic ARN (e.g., arn:aws:sns:us-east-1:123456789012:ory-events)
+//	ORY_EVENT_STREAM_ROLE_ARN  - Real AWS IAM role ARN with trust policy for Ory and sns:Publish permission
+//
+// The IAM role must have:
+// 1. Trust policy allowing Ory to assume the role
+// 2. Permission to publish to the SNS topic (sns:Publish)
 func TestAccEventStreamResource_basic(t *testing.T) {
 	topicArn := os.Getenv("ORY_EVENT_STREAM_TOPIC_ARN")
 	roleArn := os.Getenv("ORY_EVENT_STREAM_ROLE_ARN")

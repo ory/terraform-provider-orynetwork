@@ -1100,6 +1100,11 @@ func buildHTTPRequestConfigMap(ctx context.Context, cfg *CourierHTTPRequestConfi
 
 // buildAuthConfigMap converts a flattened CourierHTTPAuthModel to the nested API format:
 // {"type": "...", "config": {...}}
+//
+// Note: This function assumes the caller has validated that the appropriate fields are set
+// for each auth type. For "basic_auth", both user and password should be provided.
+// For "api_key", name, value, and in should be provided. The schema validators enforce
+// these requirements before this function is called.
 func buildAuthConfigMap(auth *CourierHTTPAuthModel) map[string]interface{} {
 	authType := auth.Type.ValueString()
 	config := map[string]interface{}{}
@@ -1619,6 +1624,9 @@ func (r *ProjectConfigResource) readProjectConfig(ctx context.Context, project *
 // Used for sensitive fields (jwks_url), fields where the API normalizes values (ttl),
 // and fields where the API returns GCS URLs instead of base64 (claims_mapper_url).
 // If no state value exists, falls back to the provided API value (or StringNull if empty).
+//
+// This function assumes the state structure is valid. The state is populated by Terraform's
+// framework and should always match the schema definition.
 func preserveTokenizerField(state *ProjectConfigResourceModel, templateName, fieldName, apiValue string) basetypes.StringValue {
 	if state.SessionTokenizerTemplates.IsNull() || state.SessionTokenizerTemplates.IsUnknown() {
 		if apiValue != "" {
@@ -1627,12 +1635,21 @@ func preserveTokenizerField(state *ProjectConfigResourceModel, templateName, fie
 		return types.StringNull()
 	}
 	elems := state.SessionTokenizerTemplates.Elements()
-	if tmplVal, ok := elems[templateName]; ok {
+	if elems == nil {
+		// Defensive: nil elements map - fall back to API value
+		if apiValue != "" {
+			return types.StringValue(apiValue)
+		}
+		return types.StringNull()
+	}
+	if tmplVal, ok := elems[templateName]; ok && tmplVal != nil {
 		if objVal, ok := tmplVal.(types.Object); ok && !objVal.IsNull() {
 			attrs := objVal.Attributes()
-			if v, ok := attrs[fieldName]; ok {
-				if s, ok := v.(types.String); ok && !s.IsNull() {
-					return s
+			if attrs != nil {
+				if v, ok := attrs[fieldName]; ok && v != nil {
+					if s, ok := v.(types.String); ok && !s.IsNull() {
+						return s
+					}
 				}
 			}
 		}

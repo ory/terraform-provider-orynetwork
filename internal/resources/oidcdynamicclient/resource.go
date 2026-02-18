@@ -440,6 +440,10 @@ func (r *OIDCDynamicClientResource) Update(ctx context.Context, req resource.Upd
 	if updated.RegistrationClientUri != nil && *updated.RegistrationClientUri != "" {
 		plan.RegistrationClientURI = types.StringValue(*updated.RegistrationClientUri)
 	} else {
+		// Preserve registration_client_uri from state when API doesn't return it.
+		// This field is a computed URI provided by the API during creation and should
+		// not be cleared. The API does not support clearing this field intentionally,
+		// so if it's missing from the response, we assume it hasn't changed.
 		plan.RegistrationClientURI = state.RegistrationClientURI
 	}
 

@@ -308,9 +308,11 @@ func (r *TrustedJwtIssuerResource) Read(ctx context.Context, req resource.ReadRe
 
 func (r *TrustedJwtIssuerResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	// This resource does not support in-place updates.
-	// All mutable-looking fields that are not marked RequiresReplace will trigger
-	// a destroy-and-recreate via plan modifiers. If Terraform still routes here,
-	// return an explicit error.
+	// All fields are marked with RequiresReplace in the schema, which means Terraform
+	// should always destroy-and-recreate when any attribute changes.
+	// This Update method exists to satisfy the resource.Resource interface and should
+	// not be reachable in normal operation. If Terraform somehow routes here, return
+	// an explicit error to prevent silent failures.
 	resp.Diagnostics.AddError(
 		"Update Not Supported",
 		"Trusted OAuth2 JWT grant issuers cannot be updated in place. "+

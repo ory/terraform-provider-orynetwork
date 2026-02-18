@@ -260,6 +260,9 @@ func (r *EventStreamResource) Update(ctx context.Context, req resource.UpdateReq
 	plan.TopicArn = types.StringValue(stream.GetTopicArn())
 	plan.RoleArn = types.StringValue(stream.GetRoleArn())
 	// Preserve created_at from state - the API may return a slightly different timestamp format
+	// (e.g., with microseconds or timezone variations) that would cause unnecessary drift.
+	// created_at is immutable after creation, so we always use the state value.
+	// updated_at is refreshed from the API to reflect the last modification time.
 	plan.CreatedAt = state.CreatedAt
 	plan.UpdatedAt = types.StringValue(stream.GetUpdatedAt().String())
 
